@@ -183,7 +183,7 @@ def synthese(data, prefix_ens, prefix_elv):
 # ── AI ───────────────────────────────────────────────────────────────────────
 
 def appeler_claude(system_prompt, user_prompt, max_tokens=5000):
-    import urllib.request
+    import urllib.request, time
     api_key = st.session_state.api_key.strip()
     if not api_key:
         st.error("Renseignez votre clé API Anthropic dans la barre latérale.")
@@ -194,17 +194,24 @@ def appeler_claude(system_prompt, user_prompt, max_tokens=5000):
         "system": system_prompt,
         "messages": [{"role": "user", "content": user_prompt}]
     }).encode()
-    req = urllib.request.Request(
-        "https://api.anthropic.com/v1/messages",
-        data=payload,
-        headers={"Content-Type": "application/json",
-                 "x-api-key": api_key,
-                 "anthropic-version": "2023-06-01"},
-        method="POST"
-    )
-    with urllib.request.urlopen(req) as resp:
-        data = json.loads(resp.read())
-    return next((b["text"] for b in data.get("content", []) if b["type"] == "text"), "")
+    for tentative in range(3):
+        try:
+            req = urllib.request.Request(
+                "https://api.anthropic.com/v1/messages",
+                data=payload,
+                headers={"Content-Type": "application/json",
+                         "x-api-key": api_key,
+                         "anthropic-version": "2023-06-01"},
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                data = json.loads(resp.read())
+            return next((b["text"] for b in data.get("content", []) if b["type"] == "text"), "")
+        except Exception as e:
+            if tentative < 2:
+                time.sleep(5)
+                continue
+            raise e
 
 SYSTEM_CODAGE = """Tu es expert en analyse qualitative NVivo des leçons de conduite (Bucheton 2009, Pratt 1998, Boccara).
 Extrais des Unités de Sens et classe-les:
