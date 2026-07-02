@@ -168,9 +168,6 @@ def synthese(data, prefix_ens, prefix_elv):
     c = counts_by_code(ns)
     g = lambda k: c.get(k, 0)
     total = len(ns)
-    P = {pk: sum(1 for n in ns if dict(zip(["code","label","pole","vid","desc"], ct))[2] == pk
-                 for ct in COMPTEURS if ct[0] == n["code"]) for pk in ["P1","P2","P3"]}
-    # simpler pole counts
     pole_codes = {pk: [ct[0] for ct in COMPTEURS if ct[2] == pk] for pk in ["P1","P2","P3"]}
     pv = {pk: sum(1 for n in ns if n["code"] in pole_codes[pk]) for pk in ["P1","P2","P3"]}
     directifs = g("C01") + g("C02") + g("C03")
