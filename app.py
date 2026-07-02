@@ -350,8 +350,8 @@ with tab_cod:
                 st.warning("Transcription vide.")
             else:
                 lignes = td["transcript"].split("\n")
-                # Découpe en segments de 40 lignes max pour éviter les timeouts
-                taille_segment = 40
+                # Découpe en segments de 20 lignes max pour éviter les timeouts
+                taille_segment = 20
                 segments = [lignes[i:i+taille_segment] for i in range(0, len(lignes), taille_segment)]
                 nb_segments = len(segments)
                 toutes_unites = []
