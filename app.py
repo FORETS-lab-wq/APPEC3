@@ -539,7 +539,7 @@ with tab_exp:
                 body += f"""<h2>Cas {eid}</h2>
 <table><tr><th>Mots Ens.</th><th>Mots Élève</th><th>Densité Ens.</th><th>Densité Él.</th><th>US</th><th>P1</th><th>P2</th><th>P3</th></tr>
 <tr><td>{s3['dv']['ew']}</td><td>{s3['dv']['lw']}</td><td>{s3['dv']['pe']}%</td><td>{s3['dv']['pl']}%</td><td>{s3['total']}</td><td>{s3['pv']['P1']}</td><td>{s3['pv']['P2']}</td><td>{s3['pv']['P3']}</td></tr></table>"""
-                cat = "\n".join(f"[US{n['u']}|{n['code']}{f'({n[chr(99)+(chr(48)+str(55))[1:]]})' if n.get('c07type') else ''}|{n['phase']}] «{n['citation']}»" for n in d3["noeuds"])
+                cat = "\n".join(f"[US{n['u']}|{n['code']}{('('+n['c07type']+')') if n.get('c07type') else ''}|{n['phase']}] «{n['citation']}»" for n in d3["noeuds"])
                 prompt = f"Analyse de cas pour {eid}. Structure: ## 1. Présentation du cas ## 2. Densité verbale ## 3. Profil de postures (Contrôleur/Transmetteur/Accompagnateur) ## 4. Composantes cliniques et citations ## 5. Interprétation théorique\nDonnées: P1={s3['pv']['P1']} P2={s3['pv']['P2']} P3={s3['pv']['P3']} codes={dict(s3['counts'])}\nUS:\n{cat}"
                 prose = appeler_claude(SYSTEM_THESE, prompt, 3000)
                 if prose:
