@@ -349,48 +349,55 @@ with tab_cod:
             if not td["transcript"].strip():
                 st.warning("Transcription vide.")
             else:
-                with st.spinner("Analyse IA en cours..."):
-                    result = appeler_claude(
-                        SYSTEM_CODAGE,
-                        f'Préfixe ens:"{pe}" élève:"{st.session_state.prefix_elv}".\n{td["transcript"]}',
-                        max_tokens=8000
-                    )
-                if result:
-                    try:
-                        # Extraction robuste : trouve le premier [ et le dernier ] valide
-                        cleaned = re.sub(r"^```json|^```|```$", "", result.strip()).strip()
-                        # Si le JSON est tronqué, tente de le réparer
-                        start = cleaned.find("[")
-                        if start == -1:
-                            raise ValueError("Aucun tableau JSON trouvé dans la réponse")
-                        cleaned = cleaned[start:]
-                        # Tente le parsing direct
+                lignes = td["transcript"].split("\n")
+                # Découpe en segments de 100 lignes max pour éviter les timeouts
+                taille_segment = 100
+                segments = [lignes[i:i+taille_segment] for i in range(0, len(lignes), taille_segment)]
+                nb_segments = len(segments)
+                toutes_unites = []
+                erreur = False
+                for idx_seg, segment in enumerate(segments):
+                    with st.spinner(f"Analyse IA en cours... (partie {idx_seg+1}/{nb_segments})"):
+                        texte_seg = "\n".join(segment)
+                        result = appeler_claude(
+                            SYSTEM_CODAGE,
+                            f'Préfixe ens:"{pe}" élève:"{st.session_state.prefix_elv}".\n{texte_seg}',
+                            max_tokens=8000
+                        )
+                    if result:
                         try:
-                            unites = json.loads(cleaned)
-                        except json.JSONDecodeError:
-                            # Répare le JSON tronqué : supprime le dernier élément incomplet
-                            last_complete = cleaned.rfind("},")
-                            if last_complete == -1:
-                                last_complete = cleaned.rfind("}")
-                            if last_complete > 0:
-                                cleaned = cleaned[:last_complete+1] + "]"
+                            cleaned = re.sub(r"^```json|^```|```$", "", result.strip()).strip()
+                            start = cleaned.find("[")
+                            if start == -1: continue
+                            cleaned = cleaned[start:]
+                            try:
                                 unites = json.loads(cleaned)
-                            else:
-                                raise
-                        td["noeuds"] = [n for n in td["noeuds"] if n["source"] != "🤖"]
-                        for u in unites:
-                            if not u.get("citation") or not u.get("code"): continue
-                            codes = [ct[0] for ct in COMPTEURS]
-                            if u["code"] not in codes: continue
-                            if PHASES.count(u.get("phase","")) == 0: continue
-                            # Skip video-only
-                            vid = next((ct[3] for ct in COMPTEURS if ct[0]==u["code"]), False)
-                            if vid: continue
-                            add_noeud(at, u["citation"], u["code"], u["phase"], u.get("c07type"), "🤖")
-                        st.success(f"✅ {len(unites)} Unités de Sens analysées.")
-                        st.rerun()
-                    except Exception as ex:
-                        st.error(f"❌ Erreur de parsing : {ex}")
+                            except json.JSONDecodeError:
+                                last_complete = cleaned.rfind("},")
+                                if last_complete == -1: last_complete = cleaned.rfind("}")
+                                if last_complete > 0:
+                                    cleaned = cleaned[:last_complete+1] + "]"
+                                    unites = json.loads(cleaned)
+                                else:
+                                    continue
+                            toutes_unites.extend(unites)
+                        except Exception as ex:
+                            st.error(f"❌ Erreur de parsing (partie {idx_seg+1}) : {ex}")
+                            erreur = True
+                            break
+
+                if not erreur and toutes_unites:
+                    td["noeuds"] = [n for n in td["noeuds"] if n["source"] != "🤖"]
+                    for u in toutes_unites:
+                        if not u.get("citation") or not u.get("code"): continue
+                        codes = [ct[0] for ct in COMPTEURS]
+                        if u["code"] not in codes: continue
+                        if PHASES.count(u.get("phase","")) == 0: continue
+                        vid = next((ct[3] for ct in COMPTEURS if ct[0]==u["code"]), False)
+                        if vid: continue
+                        add_noeud(at, u["citation"], u["code"], u["phase"], u.get("c07type"), "🤖")
+                    st.success(f"✅ {len(toutes_unites)} Unités de Sens analysées ({nb_segments} partie(s)).")
+                    st.rerun()
 
     with right:
         st.subheader(f"Compteurs cliniques — {at} ({len(td['noeuds'])} US)")
