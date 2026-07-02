@@ -183,29 +183,31 @@ def synthese(data, prefix_ens, prefix_elv):
 # ── AI ───────────────────────────────────────────────────────────────────────
 
 def appeler_claude(system_prompt, user_prompt, max_tokens=5000):
-    import urllib.request, time
+    import requests, time
     api_key = st.session_state.api_key.strip()
     if not api_key:
         st.error("Renseignez votre clé API Anthropic dans la barre latérale.")
         return None
-    payload = json.dumps({
+    payload = {
         "model": "claude-sonnet-4-6",
         "max_tokens": max_tokens,
         "system": system_prompt,
         "messages": [{"role": "user", "content": user_prompt}]
-    }).encode()
+    }
+    headers = {
+        "Content-Type": "application/json",
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01"
+    }
     for tentative in range(3):
         try:
-            req = urllib.request.Request(
+            resp = requests.post(
                 "https://api.anthropic.com/v1/messages",
-                data=payload,
-                headers={"Content-Type": "application/json",
-                         "x-api-key": api_key,
-                         "anthropic-version": "2023-06-01"},
-                method="POST"
+                json=payload, headers=headers, timeout=120
             )
-            with urllib.request.urlopen(req, timeout=120) as resp:
-                data = json.loads(resp.read())
+            if resp.status_code != 200:
+                raise Exception(f"Erreur API {resp.status_code} : {resp.text[:300]}")
+            data = resp.json()
             return next((b["text"] for b in data.get("content", []) if b["type"] == "text"), "")
         except Exception as e:
             if tentative < 2:
