@@ -186,8 +186,8 @@ def appeler_claude(system_prompt, user_prompt, max_tokens=5000):
     import requests, time
     api_key = st.session_state.api_key.strip()
     if not api_key:
-        st.error("Renseignez votre clé API Anthropic dans la barre latérale.")
-        return None
+        st.error("⚠️ Clé API Anthropic manquante — renseignez-la dans la barre latérale.")
+        st.stop()
     payload = {
         "model": "claude-sonnet-4-6",
         "max_tokens": max_tokens,
@@ -199,6 +199,7 @@ def appeler_claude(system_prompt, user_prompt, max_tokens=5000):
         "x-api-key": api_key,
         "anthropic-version": "2023-06-01"
     }
+    last_error = None
     for tentative in range(3):
         try:
             resp = requests.post(
@@ -206,14 +207,23 @@ def appeler_claude(system_prompt, user_prompt, max_tokens=5000):
                 json=payload, headers=headers, timeout=120
             )
             if resp.status_code != 200:
-                raise Exception(f"Erreur API {resp.status_code} : {resp.text[:300]}")
+                msg = f"Erreur API {resp.status_code} : {resp.text[:500]}"
+                st.error(f"❌ {msg}")
+                st.stop()
             data = resp.json()
             return next((b["text"] for b in data.get("content", []) if b["type"] == "text"), "")
-        except Exception as e:
+        except requests.exceptions.Timeout:
+            last_error = "Timeout (délai dépassé)"
             if tentative < 2:
                 time.sleep(5)
                 continue
-            raise e
+        except Exception as e:
+            last_error = str(e)
+            if tentative < 2:
+                time.sleep(3)
+                continue
+    st.error(f"❌ Échec après 3 tentatives : {last_error}")
+    st.stop()
 
 SYSTEM_CODAGE = """Tu es expert en analyse qualitative NVivo des leçons de conduite (Bucheton 2009, Pratt 1998, Boccara).
 Extrais des Unités de Sens et classe-les:
@@ -549,7 +559,32 @@ with tab_exp:
 <table><tr><th>Mots Ens.</th><th>Mots Élève</th><th>Densité Ens.</th><th>Densité Él.</th><th>US</th><th>P1</th><th>P2</th><th>P3</th></tr>
 <tr><td>{s3['dv']['ew']}</td><td>{s3['dv']['lw']}</td><td>{s3['dv']['pe']}%</td><td>{s3['dv']['pl']}%</td><td>{s3['total']}</td><td>{s3['pv']['P1']}</td><td>{s3['pv']['P2']}</td><td>{s3['pv']['P3']}</td></tr></table>"""
                 cat = "\n".join(f"[US{n['u']}|{n['code']}{('('+n['c07type']+')') if n.get('c07type') else ''}|{n['phase']}] «{n['citation']}»" for n in d3["noeuds"])
-                prompt = f"Analyse de cas pour {eid}. Structure: ## 1. Présentation du cas ## 2. Densité verbale ## 3. Profil de postures (Contrôleur/Transmetteur/Accompagnateur) ## 4. Composantes cliniques et citations ## 5. Interprétation théorique\nDonnées: P1={s3['pv']['P1']} P2={s3['pv']['P2']} P3={s3['pv']['P3']} codes={dict(s3['counts'])}\nUS:\n{cat}"
+                # Sélectionne les citations les plus représentatives (max 3 par pôle) pour alléger le prompt
+                us_par_pole = {}
+                for n in d3["noeuds"]:
+                    pk = next((ct[2] for ct in COMPTEURS if ct[0]==n["code"]), None)
+                    if pk:
+                        us_par_pole.setdefault(pk, []).append(n)
+                citations_selectionnees = []
+                for pk in ["P1","P2","P3"]:
+                    for n in us_par_pole.get(pk, [])[:4]:
+                        citations_selectionnees.append(f"[{n['code']}{('('+n['c07type']+')') if n.get('c07type') else ''}|{n['phase']}] «{n['citation']}»")
+                prompt = f"""Rédige une analyse de cas CONCISE (environ 3-4 pages A4) pour l'enseignant {eid}.
+Structure STRICTE — chaque section : 1 paragraphe dense maximum :
+## 1. Présentation du cas (5 lignes)
+## 2. Densité verbale et espace de parole (5 lignes)
+## 3. Profil de postures d'étayage — Contrôleur / Transmetteur / Accompagnateur (3 paragraphes courts)
+## 4. Composantes cliniques saillantes et citations (1 paragraphe par pôle, 1-2 citations maximum)
+## 5. Interprétation théorique au regard de Pratt / Bucheton / Boccara (1 paragraphe)
+
+Données : P1={s3['pv']['P1']} US | P2={s3['pv']['P2']} US | P3={s3['pv']['P3']} US | Total={s3['total']} US
+Densité verbale : Ens.={s3['dv']['pe']}% ({s3['dv']['ew']} mots) / Élève={s3['dv']['pl']}% ({s3['dv']['lw']} mots)
+Activations par code : {dict(s3['counts'])}
+
+Citations représentatives (extrait) :
+{chr(10).join(citations_selectionnees)}
+
+IMPORTANT : sois dense et synthétique. Pas de listes à puces. Prose académique continue. 3-4 pages maximum."""
                 prose = appeler_claude(SYSTEM_THESE, prompt, 3000)
                 if prose:
                     body += md_to_html(prose)
@@ -575,7 +610,18 @@ with tab_exp:
             body += f"<tr style='font-weight:bold'><td>TOTAL</td><td>{tw}</td><td>{tl}</td><td>{str(round(1000*tw/tt)/10)+'%' if tt else '—'}</td><td>{str(round(1000*tl/tt)/10)+'%' if tt else '—'}</td><td>{tu}</td><td>—</td><td>—</td><td>—</td></tr></table>"
 
             det = " | ".join(f"{e}: P1={synthese(st.session_state.teachers[e], st.session_state.teachers[e].get('prefix_ens','') or 'Enseignant', st.session_state.prefix_elv)['pv']['P1']} P2={synthese(st.session_state.teachers[e], st.session_state.teachers[e].get('prefix_ens','') or 'Enseignant', st.session_state.prefix_elv)['pv']['P2']} P3={synthese(st.session_state.teachers[e], st.session_state.teachers[e].get('prefix_ens','') or 'Enseignant', st.session_state.prefix_elv)['pv']['P3']} US={len(st.session_state.teachers[e]['noeuds'])}" for e in ENSEIGNANTS if st.session_state.teachers[e]["noeuds"])
-            prose2 = appeler_claude(SYSTEM_THESE, f"Synthèse transversale N={len(ENSEIGNANTS)} (Dispositif Hybride, études de cas). Structure: ## 1. Vue d'ensemble ## 2. Tendances posturales ## 3. Composantes dominantes ## 4. Variabilité interindividuelle (ressource analytique) ## 5. Réponse à l'Hypothèse 3 ## 6. Limites\nDétail: {det}", 4000)
+            prose2 = appeler_claude(SYSTEM_THESE, f"""Rédige une synthèse transversale CONCISE (environ 6-8 pages A4) du corpus complet (N={len(ENSEIGNANTS)}, Dispositif Hybride, études de cas).
+Structure STRICTE — prose académique dense, pas de listes à puces :
+## 1. Vue d'ensemble du corpus (1 paragraphe)
+## 2. Tendances posturales dominantes à l'échelle du groupe (2 paragraphes)
+## 3. Composantes cliniques tendancielles (2 paragraphes)
+## 4. Variabilité interindividuelle comme ressource analytique (2 paragraphes — valoriser la diversité des profils)
+## 5. Éléments de réponse à l'Hypothèse 3 (2 paragraphes)
+## 6. Limites méthodologiques (1 paragraphe concis)
+
+Données par enseignant : {det}
+
+IMPORTANT : 6-8 pages maximum, prose continue et dense, nuance épistémique systématique.""", 4000)
             if prose2:
                 body += md_to_html(prose2)
 
